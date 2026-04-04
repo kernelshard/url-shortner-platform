@@ -1,2 +1,37 @@
-bin/
+# Binaries
+/bin/
+/build/
+/dist/
+
+# Go build files
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test
+*.test
+*.out
+
+# Vendor (if not used)
+vendor/
+
+# Logs
+*.log
+
+# Env files
 .env
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+*.tar
+
+# Coverage
+coverage.out

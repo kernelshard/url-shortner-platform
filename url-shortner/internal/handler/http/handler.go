@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/kernelshard/url-shortner-platform/internal/service"
 	"github.com/kernelshard/url-shortner-platform/internal/repository"
+	"github.com/kernelshard/url-shortner-platform/internal/service"
 )
 
 type createRequest struct {
