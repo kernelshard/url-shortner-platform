@@ -34,7 +34,7 @@ func main() {
 
 	// Define the HTTP endpoints and associate them with handler functions
 	mux.HandleFunc("POST /urls", h.CreateShortURL)
-	mux.HandleFunc("GET /{code}", h.Redirect)
+	mux.HandleFunc("GET /r/{code}", h.Redirect)
 
 	port := ":8080"
 	log.Println("Starting server on port", port)

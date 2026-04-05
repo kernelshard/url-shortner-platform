@@ -10,6 +10,7 @@ import (
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
 	"github.com/kernelshard/url-shortner-platform/internal/model"
 	"github.com/kernelshard/url-shortner-platform/internal/repository"
+	"golang.org/x/sync/singleflight"
 )
 
 // LinkService provides business logic for managing shortened URLs.
@@ -22,6 +23,7 @@ type LinkService interface {
 type linkService struct {
 	repo  repository.LinkRepository
 	cache cache.Cache
+	sf    singleflight.Group // used for deduplicating concurrent requests
 }
 
 // NewLinkService creates a new link service with the given link repository and cache.
@@ -87,7 +89,25 @@ func (s *linkService) GetByCode(ctx context.Context, shortCode string) (model.Li
 
 	log.Printf("cache miss for short code: %s", shortCode)
 
-	link, err := s.repo.GetByCode(ctx, shortCode)
+	// 2. Collapse concurrent requests for the same short code
+	v, err, _ := s.sf.Do(shortCode, func() (any, error) {
+		// double-check cache
+		if val, ok := s.cache.Get(ctx, shortCode); ok {
+			return model.Link{
+				ShortCode:   shortCode,
+				OriginalURL: val,
+			}, nil
+		}
+
+		link, err := s.repo.GetByCode(ctx, shortCode)
+		if err != nil {
+			return model.Link{}, err
+		}
+
+		// 3. Store in cache
+		s.cache.Set(ctx, shortCode, link.OriginalURL)
+		return link, nil
+	})
 
 	// Case 1: link not found -> return ErrLinkNotFound
 	// Case 2: other DB error -> fail
@@ -97,7 +117,8 @@ func (s *linkService) GetByCode(ctx context.Context, shortCode string) (model.Li
 		}
 		return model.Link{}, err
 	}
-	return link, nil
+
+	return v.(model.Link), nil
 }
 
 // generateShortCode generates a new short code for a link.

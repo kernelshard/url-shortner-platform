@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -31,5 +32,5 @@ func (c *RedisCache) Get(ctx context.Context, key string) (string, bool) {
 
 // Set sets the value for the given key with no ttl (yet).
 func (c *RedisCache) Set(ctx context.Context, key string, value string) {
-	c.client.Set(ctx, key, value, 0) // no ttl yet
+	c.client.Set(ctx, key, value, 5*time.Minute) // no ttl yet
 }
