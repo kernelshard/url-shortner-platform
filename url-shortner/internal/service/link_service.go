@@ -24,9 +24,9 @@ type linkService struct {
 	cache cache.Cache
 }
 
-// NewLinkService creates a new link service with the given link repository.
-func NewLinkService(repo repository.LinkRepository) LinkService {
-	return &linkService{repo: repo}
+// NewLinkService creates a new link service with the given link repository and cache.
+func NewLinkService(repo repository.LinkRepository, cache cache.Cache) LinkService {
+	return &linkService{repo: repo, cache: cache}
 }
 
 // Create generates a short code for the given original URL and stores it in the repository.
