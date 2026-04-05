@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log"
+	"math/big"
 	"time"
 
 	"github.com/google/uuid"
@@ -133,8 +135,28 @@ func (s *linkService) GetByShortCode(ctx context.Context, shortCode string) (mod
 	return v.(model.Link), nil
 }
 
-// generateShortCode generates a new short code for a link.
+// generateShortCode creates a short, URL-safe identifier using high-entropy randomness.
+//
+// Design decision:
+// - Uses crypto/rand to ensure unpredictability of generated codes.
+// - Prevents enumeration attacks where attackers guess valid short URLs.
+// - Collisions are handled at the DB layer with retry logic, so generator prioritizes entropy over determinism.
+//
+// Invariant:
+// - Generated codes must be hard to predict under concurrent access.
 func generateShortCode() string {
-	// TODO: replace with real logic (random/base62 etc.)
-	return "abc123"
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const length = 6
+
+	b := make([]byte, length)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			log.Printf("failed to generate random number: %v", err)
+			panic(err)
+		}
+		b[i] = charset[n.Int64()]
+	}
+
+	return string(b)
 }
