@@ -29,7 +29,10 @@ func main() {
 	// dependency injection
 	repo := repository.NewPostgresLinkRepository(conn)
 	cache := cache.NewRedisCache(os.Getenv("REDIS_URL"))
-	pub := event.NewInMemoryPublisher()
+
+	cnsmr := event.NewLoggingConsumer()
+	pub := event.NewInMemoryPublisher(cnsmr)
+
 	svc := service.NewLinkService(repo, cache, pub)
 	h := httpTransport.NewHandler(svc)
 
