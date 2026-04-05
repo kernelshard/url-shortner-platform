@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
+	"github.com/kernelshard/url-shortner-platform/internal/event"
 	"github.com/kernelshard/url-shortner-platform/internal/model"
 	"github.com/kernelshard/url-shortner-platform/internal/repository"
 	"golang.org/x/sync/singleflight"
@@ -24,11 +25,12 @@ type linkService struct {
 	repo  repository.LinkRepository
 	cache cache.Cache
 	sf    singleflight.Group // used for deduplicating concurrent requests
+	pub   event.Publisher
 }
 
 // NewLinkService creates a new link service with the given link repository and cache.
-func NewLinkService(repo repository.LinkRepository, cache cache.Cache) LinkService {
-	return &linkService{repo: repo, cache: cache}
+func NewLinkService(repo repository.LinkRepository, cache cache.Cache, pub event.Publisher) LinkService {
+	return &linkService{repo: repo, cache: cache, pub: pub}
 }
 
 // Create generates a short code for the given original URL and stores it in the repository.
@@ -52,6 +54,15 @@ func (s *linkService) Create(ctx context.Context, originalURL string) (model.Lin
 
 		created, err := s.repo.Create(ctx, link)
 		if err == nil {
+			if s.pub != nil {
+				err = s.pub.Publish(ctx, event.Event{
+					Type: "link.created",
+					Data: created,
+				})
+				if err != nil {
+					log.Printf("failed to publish event link.created: %v", err)
+				}
+			}
 			return created, nil
 		}
 

@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
+	"github.com/kernelshard/url-shortner-platform/internal/event"
+
 	httpTransport "github.com/kernelshard/url-shortner-platform/internal/handler/http"
 	"github.com/kernelshard/url-shortner-platform/internal/repository"
 	"github.com/kernelshard/url-shortner-platform/internal/service"
@@ -27,7 +29,8 @@ func main() {
 	// dependency injection
 	repo := repository.NewPostgresLinkRepository(conn)
 	cache := cache.NewRedisCache(os.Getenv("REDIS_URL"))
-	svc := service.NewLinkService(repo, cache)
+	pub := event.NewInMemoryPublisher()
+	svc := service.NewLinkService(repo, cache, pub)
 	h := httpTransport.NewHandler(svc)
 
 	mux := http.NewServeMux()

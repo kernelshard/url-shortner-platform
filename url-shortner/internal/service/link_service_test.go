@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
+	"github.com/kernelshard/url-shortner-platform/internal/event"
 	"github.com/kernelshard/url-shortner-platform/internal/model"
 	"github.com/kernelshard/url-shortner-platform/internal/repository"
 )
@@ -43,13 +44,21 @@ func (f *fakeRepo) GetByShortCode(ctx context.Context, shortCode string) (model.
 	return model.Link{}, repository.ErrLinkNotFound
 }
 
+// create no-op publisher for tests
+type fakePublisher struct{}
+
+func (f *fakePublisher) Publish(ctx context.Context, e event.Event) error {
+	return nil
+}
+
 // TestCreateIdempotent tests the idempotent behavior of the Create method.
 // It verifies that creating a link with the same URL returns the same short code.
 func TestCreateIdempotent(t *testing.T) {
 	repo := &fakeRepo{store: make(map[string]model.Link)}
 	cache := cache.NewInMemoryCache()
+	fakePub := &fakePublisher{}
 
-	svc := NewLinkService(repo, cache)
+	svc := NewLinkService(repo, cache, fakePub)
 	ctx := context.Background()
 
 	// we create two links with the same URL, and verify that they return the same short code
@@ -68,7 +77,8 @@ func TestGetByCode_UseCache(t *testing.T) {
 	}
 
 	cache := cache.NewInMemoryCache()
-	svc := NewLinkService(repo, cache)
+	fakePub := &fakePublisher{}
+	svc := NewLinkService(repo, cache, fakePub)
 
 	ctx := context.Background()
 	link := model.Link{

@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
+	"github.com/kernelshard/url-shortner-platform/internal/event"
 	"github.com/kernelshard/url-shortner-platform/internal/model"
 	"github.com/kernelshard/url-shortner-platform/internal/repository"
 	"github.com/kernelshard/url-shortner-platform/internal/service"
@@ -65,6 +66,13 @@ func (f *fakeRepo) Get(ctx context.Context, shortCode string) (model.Link, error
 	return link, nil
 }
 
+// create no-op publisher for tests
+type fakePublisher struct{}
+
+func (f *fakePublisher) Publish(ctx context.Context, e event.Event) error {
+	return nil
+}
+
 // TestCreateShortURL_Handler tests the CreateShortURL handler
 func TestCreateShortURL_Handler(t *testing.T) {
 	reqBody := `{ "url": "https://example.com" }`
@@ -76,7 +84,8 @@ func TestCreateShortURL_Handler(t *testing.T) {
 	// use real service + fake repo, check the top level file doc/comment
 	repo := &fakeRepo{store: make(map[string]model.Link)}
 	inMemCache := cache.NewInMemoryCache()
-	svc := service.NewLinkService(repo, inMemCache)
+	fakePub := &fakePublisher{}
+	svc := service.NewLinkService(repo, inMemCache, fakePub)
 	h := NewHandler(svc)
 
 	h.CreateShortURL(w, req)
@@ -112,7 +121,8 @@ func TestCreateShortURL_Idempotent(t *testing.T) {
 
 	repo := &fakeRepo{store: make(map[string]model.Link)}
 	inMemCache := cache.NewInMemoryCache()
-	svc := service.NewLinkService(repo, inMemCache)
+	fakePub := &fakePublisher{}
+	svc := service.NewLinkService(repo, inMemCache, fakePub)
 	h := NewHandler(svc)
 
 	// first request
@@ -172,8 +182,10 @@ func TestCreateShortURL_InvalidInput(t *testing.T) {
 
 	repo := &fakeRepo{store: make(map[string]model.Link)}
 	inMemCache := cache.NewInMemoryCache()
-	svc := service.NewLinkService(repo, inMemCache)
+	fakePub := &fakePublisher{}
+	svc := service.NewLinkService(repo, inMemCache, fakePub)
 	h := NewHandler(svc)
+
 	h.CreateShortURL(w, req)
 
 	if w.Code != http.StatusBadRequest {
