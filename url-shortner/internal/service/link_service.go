@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -77,8 +78,14 @@ func (s *linkService) GetByCode(ctx context.Context, shortCode string) (model.Li
 	// 1. Check cache
 	val, ok := s.cache.Get(ctx, shortCode)
 	if ok {
-		return model.Link{ShortCode: shortCode, OriginalURL: val}, nil
+		log.Printf("cache hit for short code: %s", shortCode)
+		return model.Link{
+			ShortCode:   shortCode,
+			OriginalURL: val,
+		}, nil
 	}
+
+	log.Printf("cache miss for short code: %s", shortCode)
 
 	link, err := s.repo.GetByCode(ctx, shortCode)
 
