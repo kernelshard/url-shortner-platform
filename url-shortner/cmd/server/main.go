@@ -30,10 +30,10 @@ func main() {
 	repo := repository.NewPostgresLinkRepository(conn)
 	cache := cache.NewRedisCache(os.Getenv("REDIS_URL"))
 
-	cnsmr := event.NewLoggingConsumer()
-	pub := event.NewInMemoryPublisher(cnsmr)
-
+	pub := event.NewHTTPPublisher()
+	
 	svc := service.NewLinkService(repo, cache, pub)
+
 	h := httpTransport.NewHandler(svc)
 
 	mux := http.NewServeMux()

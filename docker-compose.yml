@@ -2,12 +2,24 @@ services:
   url-shortner:
     container_name: url-shortner
     build:
-      context: .
+      context: ./url-shortner
       dockerfile: docker/Dockerfile
     ports:
       - "8080:8080"
     env_file:
-      - .env
+      - ./url-shortner/.env
+    depends_on:
+      - db
+
+  notification-service:
+    container_name: notification-service
+    build:
+      context: ./notificaiton-service
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8081:8081"
+    env_file:
+      - ./notificaiton-service/.env
     depends_on:
       - db
 
@@ -22,7 +34,7 @@ services:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
+      - ./url-shortner/migrations:/docker-entrypoint-initdb.d
 
   redis:
     image: redis:8-alpine

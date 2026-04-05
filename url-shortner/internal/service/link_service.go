@@ -54,6 +54,7 @@ func (s *linkService) Create(ctx context.Context, originalURL string) (model.Lin
 
 		created, err := s.repo.Create(ctx, link)
 		if err == nil {
+			log.Printf("created link: %s -> %s", created.ShortCode, created.OriginalURL)
 			if s.pub != nil {
 				err = s.pub.Publish(ctx, event.Event{
 					Type: "link.created",
