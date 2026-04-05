@@ -24,7 +24,7 @@ type LinkRepository interface {
 	// or if a short code conflict occurs.
 	Create(ctx context.Context, link model.Link) (model.Link, error)
 	GetByURL(ctx context.Context, originalURL string) (model.Link, error)
-	GetByCode(ctx context.Context, shortCode string) (model.Link, error)
+	GetByShortCode(ctx context.Context, shortCode string) (model.Link, error)
 }
 
 // PostgresLinkRepository is a concrete implementation of LinkRepository using PostgreSQL.
@@ -94,8 +94,8 @@ func (r *PostgresLinkRepository) GetByURL(ctx context.Context, originalURL strin
 	return link, nil
 }
 
-// GetByCode retrieves a Link record by its short code. It returns an error if no record is found.
-func (r *PostgresLinkRepository) GetByCode(ctx context.Context, code string) (model.Link, error) {
+// GetByShortCode retrieves a Link record by its short code. It returns an error if no record is found.
+func (r *PostgresLinkRepository) GetByShortCode(ctx context.Context, shortCode string) (model.Link, error) {
 	query := `
 		SELECT id, original_url, short_code, created_at, expires_at
 		FROM links
@@ -103,7 +103,7 @@ func (r *PostgresLinkRepository) GetByCode(ctx context.Context, code string) (mo
 	`
 
 	var link model.Link
-	err := r.db.QueryRow(ctx, query, code).Scan(
+	err := r.db.QueryRow(ctx, query, shortCode).Scan(
 		&link.ID,
 		&link.OriginalURL,
 		&link.ShortCode,

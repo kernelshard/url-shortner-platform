@@ -16,7 +16,7 @@ import (
 // LinkService provides business logic for managing shortened URLs.
 type LinkService interface {
 	Create(ctx context.Context, originalURL string) (model.Link, error)
-	GetByCode(ctx context.Context, shortCode string) (model.Link, error)
+	GetByShortCode(ctx context.Context, shortCode string) (model.Link, error)
 }
 
 // linkService implements the LinkService interface.
@@ -74,9 +74,9 @@ func (s *linkService) Create(ctx context.Context, originalURL string) (model.Lin
 	return model.Link{}, lastErr
 }
 
-// GetByCode retrieves a link by its short code.
+// GetByShortCode retrieves a link by its short code.
 // If the link is not found, it returns repository.ErrLinkNotFound.
-func (s *linkService) GetByCode(ctx context.Context, shortCode string) (model.Link, error) {
+func (s *linkService) GetByShortCode(ctx context.Context, shortCode string) (model.Link, error) {
 	// 1. Check cache
 	val, ok := s.cache.Get(ctx, shortCode)
 	if ok {
@@ -99,7 +99,7 @@ func (s *linkService) GetByCode(ctx context.Context, shortCode string) (model.Li
 			}, nil
 		}
 
-		link, err := s.repo.GetByCode(ctx, shortCode)
+		link, err := s.repo.GetByShortCode(ctx, shortCode)
 		if err != nil {
 			return model.Link{}, err
 		}

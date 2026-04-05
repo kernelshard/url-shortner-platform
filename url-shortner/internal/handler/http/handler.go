@@ -95,16 +95,16 @@ func (h *Handler) CreateShortURL(w http.ResponseWriter, r *http.Request) {
 
 // Redirect handles the redirection from a short URL to the original URL.
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
-	code := r.PathValue("code")
+	shortCode := r.PathValue("code")
 
-	link, err := h.svc.GetByCode(r.Context(), code)
+	link, err := h.svc.GetByShortCode(r.Context(), shortCode)
 	if err != nil {
 		if errors.Is(err, repository.ErrLinkNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 
-		log.Printf("error fetching code=%s: %v", code, err)
+		log.Printf("error fetching code=%s: %v", shortCode, err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -112,12 +112,12 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, link.OriginalURL, http.StatusFound)
 }
 
-// GetByCode handles fetching a link by its short code.
+// GetByShortCode handles fetching a link by its short code.
 // It returns the original URL and short code if found, or a 404 error if not found.
-func (h *Handler) GetByCode(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetByShortCode(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
 
-	link, err := h.svc.GetByCode(r.Context(), code)
+	link, err := h.svc.GetByShortCode(r.Context(), code)
 	// Handle errors: link not found or other repository errors.
 	if err != nil {
 		if errors.Is(err, repository.ErrLinkNotFound) {

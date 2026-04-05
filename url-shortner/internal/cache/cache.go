@@ -32,9 +32,9 @@ func (c *InMemoryCache) Get(ctx context.Context, key string) (string, bool) {
 }
 
 // Set stores the key-value pair in the cache.
-func (c *InMemoryCache) Set(ctx context.Context, key string, value string) error {
+func (c *InMemoryCache) Set(ctx context.Context, key string, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.store[key] = value
-	return nil
+	return
 }
