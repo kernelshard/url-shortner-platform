@@ -36,5 +36,4 @@ func (c *InMemoryCache) Set(ctx context.Context, key string, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.store[key] = value
-	return
 }
