@@ -9,19 +9,19 @@ services:
     env_file:
       - ./url-shortner/.env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   notification-service:
     container_name: notification-service
     build:
-      context: ./notificaiton-service
+      context: ./notification-service
       dockerfile: docker/Dockerfile
     ports:
       - "8081:8081"
     env_file:
-      - ./notificaiton-service/.env
-    depends_on:
-      - db
+      - ./notification-service/.env
+
 
   db:
     image: postgres:15-alpine
@@ -35,12 +35,17 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./url-shortner/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:8-alpine
     container_name: redis
     ports:
-      - "6379:6379"
+      - "6399:6379"
 
 volumes:
   db_data:

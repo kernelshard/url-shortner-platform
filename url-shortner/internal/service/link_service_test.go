@@ -18,7 +18,7 @@ type fakeRepo struct {
 	callCount int
 }
 
-func (f *fakeRepo) Create(ctx context.Context, link model.Link) (model.Link, error) {
+func (f *fakeRepo) Insert(ctx context.Context, link model.Link) (model.Link, error) {
 	if existing, ok := f.store[link.OriginalURL]; ok {
 		return existing, repository.ErrLinkAlreadyExists
 	}
@@ -42,6 +42,18 @@ func (f *fakeRepo) GetByShortCode(ctx context.Context, shortCode string) (model.
 		}
 	}
 	return model.Link{}, repository.ErrLinkNotFound
+}
+
+func (f *fakeRepo) InsertOutbox(ctx context.Context, event model.OutBoxEvent) error {
+	return nil
+}
+
+func (f *fakeRepo) GetUnprocessedOutbox(ctx context.Context, limit int) ([]model.OutBoxEvent, error) {
+	return nil, nil
+}
+
+func (f *fakeRepo) MarkOutboxProcessed(ctx context.Context, id uuid.UUID) error {
+	return nil
 }
 
 // create no-op publisher for tests

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
 	"github.com/kernelshard/url-shortner-platform/internal/event"
+	"github.com/kernelshard/url-shortner-platform/internal/worker"
 
 	httpTransport "github.com/kernelshard/url-shortner-platform/internal/handler/http"
 	"github.com/kernelshard/url-shortner-platform/internal/repository"
@@ -31,8 +32,10 @@ func main() {
 	cache := cache.NewRedisCache(os.Getenv("REDIS_URL"))
 
 	pub := event.NewHTTPPublisher()
-	
+
 	svc := service.NewLinkService(repo, cache, pub)
+
+	go worker.StartOutboxWorker(repo, pub)
 
 	h := httpTransport.NewHandler(svc)
 

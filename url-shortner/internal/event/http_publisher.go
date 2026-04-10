@@ -20,8 +20,7 @@ func NewHTTPPublisher() *HTTPPublisher {
 
 // Publish publishes the given event via HTTP to the notification service.
 func (p *HTTPPublisher) Publish(ctx context.Context, event Event) error {
-	log.Printf("publishing event: %+v\n", event)
-
+	log.Printf("publishing event: type=%s", event.Type)
 	body, err := json.Marshal(event)
 	if err != nil {
 		return err

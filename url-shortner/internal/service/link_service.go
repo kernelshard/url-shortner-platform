@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"log"
 	"math/big"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
 	"github.com/kernelshard/url-shortner-platform/internal/event"
 	"github.com/kernelshard/url-shortner-platform/internal/model"
@@ -43,7 +45,7 @@ func NewLinkService(repo repository.LinkRepository, cache cache.Cache, pub event
 func (s *linkService) Create(ctx context.Context, originalURL string) (model.Link, error) {
 	var lastErr error
 
-	for range 3 {
+	for _ = range 3 {
 		shortCode := generateShortCode()
 
 		id := uuid.New()
@@ -54,37 +56,74 @@ func (s *linkService) Create(ctx context.Context, originalURL string) (model.Lin
 			CreatedAt:   time.Now(),
 		}
 
-		created, err := s.repo.Create(ctx, link)
-		if err == nil {
-			log.Printf("created link: %s -> %s", created.ShortCode, created.OriginalURL)
-			if s.pub != nil {
-				err = s.pub.Publish(ctx, event.Event{
-					Type: "link.created",
-					Data: created,
-				})
+		var (
+			created model.Link
+			err     error
+		)
+
+		// transactional path
+		if pgRepo, ok := s.repo.(*repository.PostgresLinkRepository); ok {
+			log.Printf("create: tx path url=%s", originalURL)
+
+			err = pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
+				var err error
+
+				created, err = pgRepo.InsertTx(ctx, tx, link)
 				if err != nil {
-					log.Printf("failed to publish event link.created: %v", err)
+					return err
 				}
+
+				payload, err := json.Marshal(created)
+				if err != nil {
+					return err
+				}
+
+				return pgRepo.InsertOutboxTx(ctx, tx, model.OutBoxEvent{
+					ID:      uuid.New(),
+					Type:    "link.created",
+					Payload: payload,
+				})
+			})
+		} else {
+			// fallback path (tests)
+			log.Printf("create: fallback path url=%s", originalURL)
+
+			created, err = s.repo.Insert(ctx, link)
+			if err == nil {
+				payload, _ := json.Marshal(created)
+				_ = s.repo.InsertOutbox(ctx, model.OutBoxEvent{
+					ID:      uuid.New(),
+					Type:    "link.created",
+					Payload: payload,
+				})
 			}
-			return created, nil
 		}
 
-		// Case 1: same URL already exists -> idempotent fetch
+		// idempotent case
 		if errors.Is(err, repository.ErrLinkAlreadyExists) {
+			log.Printf("create: idempotent url=%s", originalURL)
 			return s.repo.GetByURL(ctx, originalURL)
 		}
 
-		// Case 2: short_code collision -> retry with new code
-		// Rtrying is only for short code conflict, other DB errors should fail immediately
+		// retry case
 		if errors.Is(err, repository.ErrShortCodeConflict) {
+			log.Printf("create: collision retry url=%s", originalURL)
 			lastErr = err
 			continue
 		}
-		// Other DB error -> fail
-		return model.Link{}, err
+
+		// failure
+		if err != nil {
+			log.Printf("create: failed url=%s err=%v", originalURL, err)
+			return model.Link{}, err
+		}
+
+		// success
+		log.Printf("create: success id=%s short=%s", created.ID, created.ShortCode)
+		return created, nil
 	}
 
-	// exhausted retries
+	log.Printf("create: exhausted retries url=%s err=%v", originalURL, lastErr)
 	return model.Link{}, lastErr
 }
 
