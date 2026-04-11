@@ -266,12 +266,18 @@ func (r *PostgresLinkRepository) InsertOutboxTx(ctx context.Context, tx pgx.Tx, 
 	return err
 }
 
-// GetUnprocessedOutboxTx retrieves unprocessed outbox events from the database within a transaction.
-func (r *PostgresLinkRepository) GetUnprocessedOutboxTx(ctx context.Context, tx pgx.Tx, limit int) ([]model.OutBoxEvent, error) {
+// ClaimPendingOutboxTx atomically claims unprocessed outbox eventsl, each event is processed by only one worker.
+//
+// 1. selects unprocessed and unclaimes events
+// 2. skips rows locked by other transactions
+// 3. mark them as claimed by updating the `claimed_at` column
+func (r *PostgresLinkRepository) ClaimPendingOutboxTx(ctx context.Context, tx pgx.Tx, limit int) ([]model.OutBoxEvent, error) {
+	// skip already claimed events and rows locked by other transactions
 	query := `
 		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count
 		FROM outbox_events
 		WHERE processed = false
+		AND claimed_at IS NULL
 		AND next_retry_at <= NOW()
 		ORDER BY created_at
 		FOR UPDATE SKIP LOCKED
@@ -290,6 +296,23 @@ func (r *PostgresLinkRepository) GetUnprocessedOutboxTx(ctx context.Context, tx 
 			return nil, err
 		}
 		events = append(events, e)
+	}
+	// returned value length in rows peropery
+	ids := make([]uuid.UUID, 0, len(events))
+	for _, e := range events {
+		ids = append(ids, e.ID)
+	}
+
+	// Mark events as claimed as it has been retrieved for processing
+	if len(ids) > 0 {
+		_, err := tx.Exec(ctx, `
+			UPDATE outbox_events
+			SET claimed_at IS NULL OR claimed_at < NOW() - INTERVAL '1 minute'
+			WHERE id = ANY($1)
+			`, ids)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return events, nil

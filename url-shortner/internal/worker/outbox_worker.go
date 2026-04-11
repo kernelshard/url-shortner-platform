@@ -22,7 +22,9 @@ func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
 		ctx := context.Background()
 
 		err := pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
-			events, err := pgRepo.GetUnprocessedOutboxTx(ctx, tx, 10)
+			// lock rows for update, skipping locked rows for concurrency
+			// scenario: multiple workers may run concurrently, but only one should process each event
+			events, err := pgRepo.ClaimPendingOutboxTx(ctx, tx, 10)
 			if err != nil {
 				return err
 			}
