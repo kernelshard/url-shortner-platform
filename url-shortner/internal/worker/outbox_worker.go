@@ -5,45 +5,60 @@ import (
 	"log"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/kernelshard/url-shortner-platform/internal/event"
 	"github.com/kernelshard/url-shortner-platform/internal/repository"
 )
 
 func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
+	pgRepo, ok := repo.(*repository.PostgresLinkRepository)
+	if !ok {
+		log.Printf("outbox: unsupported repository type")
+		return
+	}
+
 	log.Printf("outbox: worker started")
 	for {
 		ctx := context.Background()
 
-		events, err := repo.GetUnprocessedOutbox(ctx, 10)
-		if err != nil {
-			log.Printf("outbox: fetch error: %v", err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		log.Printf("outbox: fetched count=%d", len(events))
-
-		for _, e := range events {
-			log.Printf("outbox: publishing type=%s id=%s", e.Type, e.ID)
-
-			err := pub.Publish(ctx, event.Event{
-				Type: e.Type,
-				Data: e.Payload,
-			})
-
+		err := pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
+			events, err := pgRepo.GetUnprocessedOutboxTx(ctx, tx, 10)
 			if err != nil {
-				log.Printf("outbox: publish failed id=%s err=%v", e.ID, err)
-				continue // retry later
+				return err
 			}
 
-			log.Printf("outbox: publish success id=%s", e.ID)
+			log.Printf("outbox: fetched count=%d", len(events))
 
-			err = repo.MarkOutboxProcessed(ctx, e.ID)
-			if err != nil {
-				log.Printf("outbox: mark processed failed id=%s err=%v", e.ID, err)
-			} else {
+			for _, e := range events {
+				log.Printf("outbox: publishing type=%s id=%s", e.EventType, e.ID)
+
+				err := pub.Publish(ctx, event.Event{
+					Type: e.EventType,
+					Data: e.Payload,
+				})
+
+				if err != nil {
+					log.Printf("outbox: publish failed id=%s err=%v", e.ID, err)
+					continue
+				}
+
+				log.Printf("outbox: publish success id=%s", e.ID)
+
+				err = pgRepo.MarkOutboxProcessedTx(ctx, tx, e.ID)
+				if err != nil {
+					log.Printf("outbox: mark processed failed id=%s err=%v", e.ID, err)
+					return err
+				}
+
 				log.Printf("outbox: marked processed id=%s", e.ID)
 			}
+
+			return nil
+		})
+		if err != nil {
+			log.Printf("outbox: tx error: %v", err)
+			time.Sleep(time.Second)
+			continue
 		}
 
 		time.Sleep(time.Second * 3)

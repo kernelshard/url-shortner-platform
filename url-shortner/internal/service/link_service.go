@@ -79,9 +79,9 @@ func (s *linkService) Create(ctx context.Context, originalURL string) (model.Lin
 				}
 
 				return pgRepo.InsertOutboxTx(ctx, tx, model.OutBoxEvent{
-					ID:      uuid.New(),
-					Type:    "link.created",
-					Payload: payload,
+					ID:        uuid.New(),
+					EventType: "link.created",
+					Payload:   payload,
 				})
 			})
 		} else {
@@ -92,9 +92,9 @@ func (s *linkService) Create(ctx context.Context, originalURL string) (model.Lin
 			if err == nil {
 				payload, _ := json.Marshal(created)
 				_ = s.repo.InsertOutbox(ctx, model.OutBoxEvent{
-					ID:      uuid.New(),
-					Type:    "link.created",
-					Payload: payload,
+					ID:        uuid.New(),
+					EventType: "link.created",
+					Payload:   payload,
 				})
 			}
 		}
