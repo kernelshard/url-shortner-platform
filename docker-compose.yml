@@ -22,7 +22,6 @@ services:
     env_file:
       - ./notification-service/.env
 
-
   db:
     image: postgres:15-alpine
     container_name: db
@@ -47,5 +46,18 @@ services:
     ports:
       - "6399:6379"
 
+  db_test:
+    image: postgres:15-alpine
+    container_name: db_test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shortner_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./url-shortner/migrations:/docker-entrypoint-initdb.d
+
 volumes:
   db_data:
+  db_test_data:
