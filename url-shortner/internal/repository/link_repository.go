@@ -129,8 +129,8 @@ func (r *PostgresLinkRepository) GetByShortCode(ctx context.Context, shortCode s
 // InsertOutbox inserts an outbox event into the database.
 func (r *PostgresLinkRepository) InsertOutbox(ctx context.Context, event model.OutBoxEvent) error {
 	query := `
-		INSERT INTO outbox_events (id, event_type, payload, created_at, processed, next_retry_at, retry_count)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO outbox_events (id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 	_, err := r.db.Exec(ctx, query,
 		event.ID,
@@ -140,6 +140,7 @@ func (r *PostgresLinkRepository) InsertOutbox(ctx context.Context, event model.O
 		event.Processed,
 		event.NextRetryAt,
 		event.RetryCount,
+		event.ClaimedAt,
 	)
 	return err
 }
@@ -147,7 +148,7 @@ func (r *PostgresLinkRepository) InsertOutbox(ctx context.Context, event model.O
 // GetUnprocessedOutbox retrieves unprocessed outbox events from the database.
 func (r *PostgresLinkRepository) GetUnprocessedOutbox(ctx context.Context, limit int) ([]model.OutBoxEvent, error) {
 	query := `
-		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count
+		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at
 		FROM outbox_events
 		WHERE processed = false
 		AND next_retry_at <= NOW()
@@ -165,7 +166,7 @@ func (r *PostgresLinkRepository) GetUnprocessedOutbox(ctx context.Context, limit
 
 	for rows.Next() {
 		var e model.OutBoxEvent
-		if err := rows.Scan(&e.ID, &e.EventType, &e.Payload, &e.CreatedAt, &e.Processed, &e.NextRetryAt, &e.RetryCount); err != nil {
+		if err := rows.Scan(&e.ID, &e.EventType, &e.Payload, &e.CreatedAt, &e.Processed, &e.NextRetryAt, &e.RetryCount, &e.ClaimedAt); err != nil {
 			return nil, err
 		}
 		events = append(events, e)
@@ -274,10 +275,13 @@ func (r *PostgresLinkRepository) InsertOutboxTx(ctx context.Context, tx pgx.Tx, 
 func (r *PostgresLinkRepository) ClaimPendingOutboxTx(ctx context.Context, tx pgx.Tx, limit int) ([]model.OutBoxEvent, error) {
 	// skip already claimed events and rows locked by other transactions
 	query := `
-		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count
+		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at
 		FROM outbox_events
 		WHERE processed = false
-		AND claimed_at IS NULL
+		AND (
+		    claimed_at IS NULL
+			OR claimed_at < NOW() - INTERVAL '1 minute'
+		)
 		AND next_retry_at <= NOW()
 		ORDER BY created_at
 		FOR UPDATE SKIP LOCKED
@@ -292,7 +296,11 @@ func (r *PostgresLinkRepository) ClaimPendingOutboxTx(ctx context.Context, tx pg
 	var events []model.OutBoxEvent
 	for rows.Next() {
 		var e model.OutBoxEvent
-		if err := rows.Scan(&e.ID, &e.EventType, &e.Payload, &e.CreatedAt, &e.Processed, &e.NextRetryAt, &e.RetryCount); err != nil {
+		if err := rows.Scan(
+			&e.ID, &e.EventType,
+			&e.Payload, &e.CreatedAt,
+			&e.Processed, &e.NextRetryAt,
+			&e.RetryCount, &e.ClaimedAt); err != nil {
 			return nil, err
 		}
 		events = append(events, e)
@@ -307,7 +315,7 @@ func (r *PostgresLinkRepository) ClaimPendingOutboxTx(ctx context.Context, tx pg
 	if len(ids) > 0 {
 		_, err := tx.Exec(ctx, `
 			UPDATE outbox_events
-			SET claimed_at IS NULL OR claimed_at < NOW() - INTERVAL '1 minute'
+			SET claimed_at = NOW()
 			WHERE id = ANY($1)
 			`, ids)
 		if err != nil {
