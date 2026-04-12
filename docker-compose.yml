@@ -21,6 +21,9 @@ services:
       - "8081:8081"
     env_file:
       - ./notification-service/.env
+    depends_on:
+      notification-db:
+        condition: service_started
 
   db:
     image: postgres:15-alpine
@@ -39,6 +42,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  notification-db:
+    image: postgres:15-alpine
+    container_name: notification-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: notification
+    ports:
+      - "5434:5432"
+    volumes:
+      - notification_db_data:/var/lib/postgresql/data
+      - ./notification-service/migrations:/docker-entrypoint-initdb.d
 
   redis:
     image: redis:8-alpine
@@ -60,4 +76,5 @@ services:
 
 volumes:
   db_data:
+  notification_db_data:
   db_test_data:

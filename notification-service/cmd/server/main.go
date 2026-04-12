@@ -1,16 +1,30 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kernelshard/url-shortner-platform/notification-service/internal/handler"
 )
 
 func main() {
-	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("received event")
-		w.WriteHeader(http.StatusOK)
-	})
+	ctx := context.Background()
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URL environment variable not set")
+	}
+	dbPool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dbPool.Close()
+
+	h := handler.NewHTTPHandler(dbPool)
+	http.HandleFunc("/events", h.HandleEvents)
+
 	port := os.Getenv("PORT")
 	log.Println("notification service running on :", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))

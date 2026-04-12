@@ -46,6 +46,7 @@ func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
 			log.Printf("outbox: publishing event: %v", e.ID)
 
 			err := pub.Publish(ctx, event.Event{
+				ID:   e.ID.String(),
 				Type: e.EventType,
 				Data: e.Payload,
 			})
