@@ -40,15 +40,15 @@ func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
 			time.Sleep(time.Second)
 			continue
 		}
-
+		log.Printf("outbox: claimed=%d", len(events))
 		// Step 2: publish events (no transaction needed)
 		for _, e := range events {
 			log.Printf("outbox: publishing event: %v", e.ID)
 
 			err := pub.Publish(ctx, event.Event{
-				ID:   e.ID.String(),
-				Type: e.EventType,
-				Data: e.Payload,
+				EventID: e.ID.String(),
+				Type:    e.EventType,
+				Data:    e.Payload,
 			})
 			if err != nil {
 				log.Printf("outbox: publish failed id=%s err=%v", e.ID, err)
@@ -57,7 +57,7 @@ func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
 
 			// Step 3: mark event as processed
 			err = pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
-				return pgRepo.MarkOutboxProcessed(ctx, e.ID)
+				return pgRepo.MarkOutboxProcessedTx(ctx, tx, e.ID)
 			})
 			if err != nil {
 				log.Printf("outbox: mark processed failed id=%s err=%v", e.ID, err)
