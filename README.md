@@ -1,131 +1,116 @@
-# URL Shortener Platform (System Design Exploration)
+# URL Shortener Platform
 
-This is not just a URL shortener.
+This repository is a system design journey: starting from a simple URL shortener and evolving it toward production-grade reliability.
 
-This project explores how a simple service evolves into a reliable, distributed system under real-world constraints such as failures, concurrency, and scale.
+The journey is still in progress and there is still distance to the destination, but the platform already includes transactional outbox, background event processing, and idempotent event consumption.
 
----
+## Current State
 
-## 🎯 Objectives
+Implemented today:
+- URL creation and redirect flow with PostgreSQL persistence
+- Idempotent create behavior (unique original URL)
+- Redis cache with singleflight protection on cache miss
+- Outbox pattern on write path (link + event persisted in one DB transaction)
+- Background outbox worker claiming and publishing events
+- HTTP publisher with retry + exponential backoff
+- Separate notification service with idempotent processed-events table
+- Docker Compose setup for all services and dependencies
 
-- Build a clean and extensible service architecture
-- Ensure correctness through idempotency and data constraints
-- Introduce asynchronous event-driven design
-- Handle failures with retry and backoff strategies
-- Move towards guaranteed delivery (Outbox pattern)
-- Prepare the system for high-traffic scenarios
+## Services
 
----
+- url-shortner
+	- API for creating and resolving short links
+	- Writes to links table and outbox_events table transactionally
+	- Runs outbox worker in-process
+- notification-service
+	- Receives published events on /events
+	- Uses insert-first idempotency with unique event_id in processed_events
 
-## 🧠 Key Concepts Implemented
+## Architecture
 
-- **Idempotency** via database constraints (unique original URL)
-- **Caching + singleflight** to prevent cache stampede
-- **Separation of concerns** using interface-driven design
-- **Event-driven architecture** using publisher abstraction
-- **Retry with exponential backoff** for transient failures
-- **Service decoupling** via HTTP-based event publishing
+### URL Create Flow
 
----
+1. Client calls POST /urls.
+2. URL service inserts link into links.
+3. In the same transaction, URL service inserts link.created event into outbox_events.
+4. Outbox worker claims pending rows (FOR UPDATE SKIP LOCKED + claimed_at).
+5. Worker publishes to notification service.
+6. On success, event is marked processed.
 
-## 🏗️ Architecture Evolution
+### Redirect Flow
 
-### Phase 1 — Synchronous Core
-- Basic URL creation and retrieval
-- Database as the source of truth
+1. Client calls GET /r/{code}.
+2. URL service checks Redis cache first.
+3. On miss, service loads from PostgreSQL and fills cache.
+4. singleflight collapses concurrent misses for same code.
 
----
+## Reliability Design Notes
 
-### Phase 2 — In-Memory Events (Simulation)
-- Introduced publisher abstraction
-- Simulated consumer for validating event flow
+- Atomicity for write + event enqueue is achieved with DB transaction.
+- Event consumption is idempotent in notification service (duplicate event_id ignored).
+- Outbox claim strategy supports multiple workers safely.
+- Event publish retries use exponential backoff for transient network errors.
 
----
+## Known Gaps
 
-### Phase 3 — Distributed System (HTTP)
-- URL service publishes events over HTTP
-- Notification service consumes events
-- Established real service boundary
+- Failed publish attempts are currently retried by publisher, but retry_count and next_retry_at are not yet updated by the worker for durable scheduled retries.
+- HTTP event transport creates tighter coupling than broker-based asynchronous transport.
+- Observability is currently log-based; metrics and tracing are not wired yet.
 
----
+## Repository Layout
 
-### Phase 4 — Resilience
-- Retry with exponential backoff
-- Improved logging for observability
-- Best-effort event delivery
+- url-shortner
+	- cmd/server/main.go
+	- internal/service, internal/repository, internal/worker, internal/cache, internal/event
+	- migrations for links and outbox schema
+- notification-service
+	- cmd/server/main.go
+	- internal/handler/http.go
+	- migrations for processed_events idempotency table
 
----
+## Run With Docker Compose
 
-### Phase 5 (Next) — Durability
-- Outbox pattern for atomicity between DB and events
-- Guarantees eventual event delivery
+From the repository root:
 
----
+```bash
+docker compose up --build
+```
 
-### Phase 6 (Future) — High Traffic Readiness
-- Redis-based distributed caching
-- Horizontal scaling of services
-- Read replicas and database optimization
-- Message broker (Kafka/Redis Streams) for async communication
-- Rate limiting and backpressure handling
+Services:
+- URL API: http://localhost:8080
+- Notification service: http://localhost:8081
+- PostgreSQL (url-shortner): localhost:5432
+- PostgreSQL (notification-service): localhost:5434
+- Redis: localhost:6399
 
----
+## API
 
-## 🔁 Current Request Flow
+Create short URL:
 
-### URL Creation
+```bash
+curl -X POST http://localhost:8080/urls \
+	-H "Content-Type: application/json" \
+	-d '{"url":"https://example.com"}'
+```
 
-Client → URL Service → DB  
-          ↘ HTTP Event → Notification Service
+Redirect:
 
----
+```bash
+curl -i http://localhost:8080/r/<short_code>
+```
 
-### URL Redirect
+## Roadmap
 
-Client → URL Service → Cache → DB (fallback)
+Planned next:
+- Durable retry scheduling in outbox worker using retry_count and next_retry_at
+- Dead-letter strategy for permanently failing events
+- Broker-based delivery (Kafka or Redis Streams)
+- Better observability (metrics, tracing, dashboards)
+- Rate limiting and traffic shaping
+- Horizontal scaling and operational hardening
 
----
+## Why This Project
 
-## ⚠️ Known Limitations (Current Stage)
+This codebase is intentionally iterative.
 
-- Event delivery is **best-effort** (may be lost on failure)
-- No durable event storage (Outbox not implemented yet)
-- Tight coupling via HTTP (no message broker yet)
-
----
-
-## 🧩 Design Trade-offs
-
-- Prioritized **correctness of core data** over side-effects
-- Accepted **eventual inconsistency** in current phase
-- Deferred durability in favor of incremental learning
-- Used HTTP instead of broker to validate behavior first
-
----
-
-## 🚀 Why This Project
-
-This project focuses on **how systems evolve**, not just what they do.
-
-It demonstrates:
-- Thoughtful trade-offs
-- Failure-aware design
-- Incremental architecture improvements
-
-Rather than building features, the goal is to build **correct systems under real-world conditions**.
-
----
-
-## 📌 Next Steps
-
-- Implement Outbox pattern for guaranteed event delivery
-- Introduce background worker for event publishing
-- Move to message broker (Kafka/Redis Streams)
-- Add rate limiting and traffic control
-
----
-
-## 🧠 Takeaway
-
-> Building scalable systems is not about adding components.
-> It is about preserving correctness as complexity increases.
+The goal is not only feature delivery, but learning how to preserve correctness as distributed-system complexity grows.
