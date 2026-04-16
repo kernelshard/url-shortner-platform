@@ -199,8 +199,11 @@ func (r *PostgresLinkRepository) MarkOutboxProcessedTx(ctx context.Context, tx p
 }
 
 // UpdateNextRetry updates the next retry time for an outbox event in the database.
-func (r *PostgresLinkRepository) UpdateNextRetry(ctx context.Context, id uuid.UUID, next time.Time) error {
-	query := `UPDATE outbox_events SET next_retry_at = $1 WHERE id=$2`
+func (r *PostgresLinkRepository) UpdateRetryState(ctx context.Context, id uuid.UUID, next time.Time) error {
+	query := `UPDATE outbox_events
+			  SET retry_count = retry_count + 1,
+					next_retry_at = $1
+			  WHERE id = $2`
 	_, err := r.db.Exec(ctx, query, next, id)
 	return err
 }

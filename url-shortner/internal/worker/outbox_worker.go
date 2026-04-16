@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"log"
+	"math/rand"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -52,6 +53,14 @@ func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
 			})
 			if err != nil {
 				log.Printf("outbox: publish failed id=%s err=%v", e.ID, err)
+				// publish failed, so retry is needed otherwise it will be lost
+				nextRetry := computeNextRetry(e.RetryCount)
+				err := pgRepo.UpdateRetryState(ctx, e.ID, nextRetry)
+				if err != nil {
+					log.Printf("outbox: failed to update retry state id=%s err=%v", e.ID, err)
+				}
+
+				log.Printf("outbox: scheduled retry id=%s at=%v", e.ID, nextRetry)
 				continue
 			}
 
@@ -69,4 +78,22 @@ func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
 
 		time.Sleep(3 * time.Second)
 	}
+}
+
+// computeNextRetry computes the next retry time with exponential backoff and jitter
+func computeNextRetry(retryCount int) time.Time {
+	base := 5 * time.Second
+	max := 5 * time.Minute           // without max cap it would grow exponentially
+	retryCount = min(retryCount, 10) // cap retry count at 10 to avoid exponential growth
+
+	// exponential backoff with jitter
+	delay := base * time.Duration(1<<retryCount)
+	delay = min(delay, max)
+
+	jitter := time.Duration(rand.Int63n(int64(delay / 2)))
+
+	// suppose 1000 events failed in a row
+	// jitter will spread out the retries over time, so they don't all happen at once
+	nextRetry := time.Now().Add(delay + jitter)
+	return nextRetry
 }
