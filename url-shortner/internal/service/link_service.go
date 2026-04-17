@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
 	"github.com/kernelshard/url-shortner-platform/internal/event"
 	"github.com/kernelshard/url-shortner-platform/internal/model"
@@ -26,14 +25,14 @@ type LinkService interface {
 
 // linkService implements the LinkService interface.
 type linkService struct {
-	repo  repository.LinkRepository
+	repo  repository.LinkOutboxRepository
 	cache cache.Cache
 	sf    singleflight.Group // used for deduplicating concurrent requests
 	pub   event.Publisher
 }
 
 // NewLinkService creates a new link service with the given link repository and cache.
-func NewLinkService(repo repository.LinkRepository, cache cache.Cache, pub event.Publisher) LinkService {
+func NewLinkService(repo repository.LinkOutboxRepository, cache cache.Cache, pub event.Publisher) LinkService {
 	return &linkService{repo: repo, cache: cache, pub: pub}
 }
 
@@ -53,76 +52,48 @@ func (s *linkService) Create(ctx context.Context, originalURL string) (model.Lin
 			ID:          id,
 			OriginalURL: originalURL,
 			ShortCode:   shortCode,
-			CreatedAt:   time.Now(),
+			CreatedAt:   time.Now().UTC(),
 		}
 
-		var (
-			created model.Link
-			err     error
-		)
-
-		// transactional path
-		if pgRepo, ok := s.repo.(*repository.PostgresLinkRepository); ok {
-			log.Printf("create: tx path url=%s", originalURL)
-
-			err = pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
-				var err error
-
-				created, err = pgRepo.InsertTx(ctx, tx, link)
-				if err != nil {
-					return err
-				}
-
-				payload, err := json.Marshal(created)
-				if err != nil {
-					return err
-				}
-
-				return pgRepo.InsertOutboxTx(ctx, tx, model.OutBoxEvent{
-					ID:        uuid.New(),
-					EventType: "link.created",
-					Payload:   payload,
-				})
-			})
-		} else {
-			// fallback path (tests)
-			log.Printf("create: fallback path url=%s", originalURL)
-
-			created, err = s.repo.Insert(ctx, link)
-			if err == nil {
-				payload, _ := json.Marshal(created)
-				_ = s.repo.InsertOutbox(ctx, model.OutBoxEvent{
-					ID:        uuid.New(),
-					EventType: "link.created",
-					Payload:   payload,
-				})
-			}
+		// prepare event payload
+		payload, err := json.Marshal(link)
+		if err != nil {
+			return model.Link{}, err
 		}
 
-		// idempotent case
+		event := model.OutBoxEvent{
+			ID:        uuid.New(),
+			EventType: "link.created",
+			Payload:   payload,
+		}
+
+		// single atomic call
+		created, err := s.repo.CreateWithOutbox(ctx, link, event)
+
+		// Idempotency: same URL already exists
 		if errors.Is(err, repository.ErrLinkAlreadyExists) {
 			log.Printf("create: idempotent url=%s", originalURL)
-			return s.repo.GetByURL(ctx, originalURL)
+			link, err := s.repo.GetByURL(ctx, originalURL)
+			return link, err
 		}
 
-		// retry case
+		// Retry: short code collision
 		if errors.Is(err, repository.ErrShortCodeConflict) {
 			log.Printf("create: collision retry url=%s", originalURL)
 			lastErr = err
 			continue
 		}
 
-		// failure
+		// Failure
 		if err != nil {
 			log.Printf("create: failed url=%s err=%v", originalURL, err)
 			return model.Link{}, err
 		}
 
-		// success
+		// Success
 		log.Printf("create: success id=%s short=%s", created.ID, created.ShortCode)
 		return created, nil
 	}
-
 	log.Printf("create: exhausted retries url=%s err=%v", originalURL, lastErr)
 	return model.Link{}, lastErr
 }
@@ -146,14 +117,18 @@ func (s *linkService) GetByShortCode(ctx context.Context, shortCode string) (mod
 	v, err, _ := s.sf.Do(shortCode, func() (any, error) {
 		// double-check cache
 		if val, ok := s.cache.Get(ctx, shortCode); ok {
+			log.Printf("cache hit (after singleflight) short=%s", shortCode)
 			return model.Link{
 				ShortCode:   shortCode,
 				OriginalURL: val,
 			}, nil
 		}
 
+		log.Printf("db fetch for short code=%s", shortCode)
 		link, err := s.repo.GetByShortCode(ctx, shortCode)
+
 		if err != nil {
+			log.Printf("db error short=%s err=%v", shortCode, err)
 			return model.Link{}, err
 		}
 
@@ -166,6 +141,7 @@ func (s *linkService) GetByShortCode(ctx context.Context, shortCode string) (mod
 	// Case 2: other DB error -> fail
 	if err != nil {
 		if err == repository.ErrLinkNotFound {
+			log.Printf("not found short=%s", shortCode)
 			return model.Link{}, repository.ErrLinkNotFound
 		}
 		return model.Link{}, err

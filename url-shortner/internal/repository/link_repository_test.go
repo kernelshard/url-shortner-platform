@@ -17,8 +17,8 @@ import (
 func TestClaimPendingOutboxTx_Concurrent(t *testing.T) {
 	ctx := context.Background()
 
-	repo, db := setupTestRepo(t)
-	cleanDB(t, db)
+	repo, db := SetupTestRepo(t)
+	CleanDB(t, db)
 
 	// insert one event
 	event := model.OutBoxEvent{
@@ -78,8 +78,8 @@ func TestClaimPendingOutboxTx_Concurrent(t *testing.T) {
 func TestClaimPendingOutboxTx_NotRefetched(t *testing.T) {
 	ctx := context.Background()
 
-	repo, db := setupTestRepo(t)
-	cleanDB(t, db)
+	repo, db := SetupTestRepo(t)
+	CleanDB(t, db)
 
 	event := model.OutBoxEvent{
 		ID:          uuid.New(),

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/kernelshard/url-shortner-platform/internal/cache"
 	"github.com/kernelshard/url-shortner-platform/internal/event"
 	"github.com/kernelshard/url-shortner-platform/internal/model"
@@ -24,6 +25,10 @@ func (f *fakeRepo) Insert(ctx context.Context, link model.Link) (model.Link, err
 	}
 	f.store[link.OriginalURL] = link
 	return link, nil
+}
+
+func (f *fakeRepo) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	return fn(nil)
 }
 
 func (f *fakeRepo) GetByURL(ctx context.Context, url string) (model.Link, error) {
@@ -48,11 +53,27 @@ func (f *fakeRepo) InsertOutbox(ctx context.Context, event model.OutBoxEvent) er
 	return nil
 }
 
+func (f *fakeRepo) CreateWithOutbox(ctx context.Context, link model.Link, event model.OutBoxEvent) (model.Link, error) {
+	return f.Insert(ctx, link)
+}
+
+func (f *fakeRepo) ClaimPendingOutboxTx(ctx context.Context, tx pgx.Tx, limit int) ([]model.OutBoxEvent, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) GetUnprocessedOutbox(ctx context.Context, limit int) ([]model.OutBoxEvent, error) {
 	return nil, nil
 }
 
 func (f *fakeRepo) MarkOutboxProcessed(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (f *fakeRepo) MarkOutboxProcessedTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
+	return nil
+}
+
+func (f *fakeRepo) UpdateRetryState(ctx context.Context, id uuid.UUID, next time.Time) error {
 	return nil
 }
 

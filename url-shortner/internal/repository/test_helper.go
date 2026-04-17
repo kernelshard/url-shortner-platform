@@ -8,7 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func cleanDB(t *testing.T, db *pgxpool.Pool) {
+// CleanDB truncates the existing outbox_events rows
+// fit for calling before each test
+func CleanDB(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 
 	_, err := db.Exec(context.Background(), `
@@ -16,7 +18,8 @@ func cleanDB(t *testing.T, db *pgxpool.Pool) {
 	require.NoError(t, err)
 }
 
-func setupTestRepo(t *testing.T) (*PostgresLinkRepository, *pgxpool.Pool) {
+// SetupTestRepo sets up a test repository with a fresh database connection
+func SetupTestRepo(t *testing.T) (*PostgresLinkRepository, *pgxpool.Pool) {
 	t.Helper()
 
 	ctx := context.Background()

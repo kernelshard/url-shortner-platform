@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -55,5 +56,5 @@ func (p *HTTPPublisher) Publish(ctx context.Context, event Event) error {
 	}
 
 	log.Printf("event permanently failed (type=%s) after %d attempts", event.Type, maxRetries)
-	return nil
+	return fmt.Errorf("publish failed after %d attempts", maxRetries)
 }

@@ -3,12 +3,10 @@ package repository
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kernelshard/url-shortner-platform/internal/model"
 )
 
@@ -26,20 +24,7 @@ type LinkRepository interface {
 	Insert(ctx context.Context, link model.Link) (model.Link, error)
 	GetByURL(ctx context.Context, originalURL string) (model.Link, error)
 	GetByShortCode(ctx context.Context, shortCode string) (model.Link, error)
-
-	// OutboxEvents
-	InsertOutbox(ctx context.Context, event model.OutBoxEvent) error
-	GetUnprocessedOutbox(ctx context.Context, limit int) ([]model.OutBoxEvent, error)
-	MarkOutboxProcessed(ctx context.Context, id uuid.UUID) error
-}
-
-// PostgresLinkRepository is a concrete implementation of LinkRepository using PostgreSQL.
-type PostgresLinkRepository struct {
-	db *pgxpool.Pool
-}
-
-func NewPostgresLinkRepository(db *pgxpool.Pool) *PostgresLinkRepository {
-	return &PostgresLinkRepository{db: db}
+	CreateWithOutbox(ctx context.Context, link model.Link, event model.OutBoxEvent) (model.Link, error)
 }
 
 // Insert inserts a new Link record into the database.
@@ -126,104 +111,35 @@ func (r *PostgresLinkRepository) GetByShortCode(ctx context.Context, shortCode s
 	return link, nil
 }
 
-// InsertOutbox inserts an outbox event into the database.
-func (r *PostgresLinkRepository) InsertOutbox(ctx context.Context, event model.OutBoxEvent) error {
-	query := `
-		INSERT INTO outbox_events (id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`
-	_, err := r.db.Exec(ctx, query,
-		event.ID,
-		event.EventType,
-		event.Payload,
-		event.CreatedAt,
-		event.Processed,
-		event.NextRetryAt,
-		event.RetryCount,
-		event.ClaimedAt,
-	)
-	return err
-}
-
-// GetUnprocessedOutbox retrieves unprocessed outbox events from the database.
-func (r *PostgresLinkRepository) GetUnprocessedOutbox(ctx context.Context, limit int) ([]model.OutBoxEvent, error) {
-	query := `
-		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at
-		FROM outbox_events
-		WHERE processed = false
-		AND next_retry_at <= NOW()
-		ORDER BY created_at
-		FOR UPDATE SKIP LOCKED
-		LIMIT $1
-	`
-	rows, err := r.db.Query(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var events []model.OutBoxEvent
-
-	for rows.Next() {
-		var e model.OutBoxEvent
-		if err := rows.Scan(&e.ID, &e.EventType, &e.Payload, &e.CreatedAt, &e.Processed, &e.NextRetryAt, &e.RetryCount, &e.ClaimedAt); err != nil {
-			return nil, err
-		}
-		events = append(events, e)
-	}
-
-	return events, nil
-
-}
-
-// MarkOutboxProcessed marks an outbox event as processed in the database.
-func (r *PostgresLinkRepository) MarkOutboxProcessed(ctx context.Context, id uuid.UUID) error {
-	query := `
-		UPDATE outbox_events
-		SET processed = true
-		WHERE id = $1
-	`
-	_, err := r.db.Exec(ctx, query, id)
-	return err
-}
-
-// MarkOutboxProcessedTx marks an outbox event as processed in the database within a transaction.
-func (r *PostgresLinkRepository) MarkOutboxProcessedTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
-	query := `
-		UPDATE outbox_events
-		SET processed = true
-		WHERE id = $1
-	`
-	_, err := tx.Exec(ctx, query, id)
-	return err
-}
-
-// UpdateNextRetry updates the next retry time for an outbox event in the database.
-func (r *PostgresLinkRepository) UpdateRetryState(ctx context.Context, id uuid.UUID, next time.Time) error {
-	query := `UPDATE outbox_events
-			  SET retry_count = retry_count + 1,
-					next_retry_at = $1
-			  WHERE id = $2`
-	_, err := r.db.Exec(ctx, query, next, id)
-	return err
-}
-
-// WithTx executes a function within a transaction.
-func (r *PostgresLinkRepository) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+// CreateWithOutbox inserts a link into the database with an outbox event.
+func (r *PostgresLinkRepository) CreateWithOutbox(ctx context.Context, link model.Link, event model.OutBoxEvent) (model.Link, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return err
+		return model.Link{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Insert the link into the database within the transaction
+	link, err = r.insertTx(ctx, tx, link)
+	if err != nil {
+		return model.Link{}, err
 	}
 
-	defer tx.Rollback(ctx)
-	if err := fn(tx); err != nil {
-		return err
+	// Insert the outbox event into the database within the transaction
+	err = r.insertOutboxTx(ctx, tx, event)
+	if err != nil {
+		return model.Link{}, err
 	}
-	return tx.Commit(ctx)
+
+	if err := tx.Commit(ctx); err != nil {
+		return model.Link{}, err
+	}
+
+	return link, nil
 }
 
-// InsertTx inserts a link into the database within a transaction.
-func (r *PostgresLinkRepository) InsertTx(ctx context.Context, tx pgx.Tx, link model.Link) (model.Link, error) {
+// insertTx inserts a link into the database within a transaction.
+func (r *PostgresLinkRepository) insertTx(ctx context.Context, tx pgx.Tx, link model.Link) (model.Link, error) {
 	query := `
 		INSERT INTO links (id, original_url, short_code, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
@@ -253,78 +169,17 @@ func (r *PostgresLinkRepository) InsertTx(ctx context.Context, tx pgx.Tx, link m
 }
 
 // InsertOutboxTx inserts an outbox event into the database within a transaction.
-func (r *PostgresLinkRepository) InsertOutboxTx(ctx context.Context, tx pgx.Tx, event model.OutBoxEvent) error {
+func (r *PostgresLinkRepository) insertOutboxTx(ctx context.Context, tx pgx.Tx, event model.OutBoxEvent) error {
 	query := `
-		INSERT INTO outbox_events (id, event_type, payload, created_at, processed, next_retry_at, retry_count)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO outbox_events (
+			id, event_type, payload, created_at, processed, next_retry_at, retry_count
+		)
+		VALUES ($1, $2, $3, NOW(), false, NOW(), 0)
 	`
 	_, err := tx.Exec(ctx, query,
 		event.ID,
 		event.EventType,
 		event.Payload,
-		event.CreatedAt,
-		event.Processed,
-		event.NextRetryAt,
-		event.RetryCount,
 	)
 	return err
-}
-
-// ClaimPendingOutboxTx atomically claims unprocessed outbox eventsl, each event is processed by only one worker.
-//
-// 1. selects unprocessed and unclaimes events
-// 2. skips rows locked by other transactions
-// 3. mark them as claimed by updating the `claimed_at` column
-func (r *PostgresLinkRepository) ClaimPendingOutboxTx(ctx context.Context, tx pgx.Tx, limit int) ([]model.OutBoxEvent, error) {
-	// skip already claimed events and rows locked by other transactions
-	query := `
-		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at
-		FROM outbox_events
-		WHERE processed = false
-		AND (
-		    claimed_at IS NULL
-			OR claimed_at < NOW() - INTERVAL '1 minute'
-		)
-		AND next_retry_at <= NOW()
-		ORDER BY created_at
-		FOR UPDATE SKIP LOCKED
-		LIMIT $1
-	`
-	rows, err := tx.Query(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var events []model.OutBoxEvent
-	for rows.Next() {
-		var e model.OutBoxEvent
-		if err := rows.Scan(
-			&e.ID, &e.EventType,
-			&e.Payload, &e.CreatedAt,
-			&e.Processed, &e.NextRetryAt,
-			&e.RetryCount, &e.ClaimedAt); err != nil {
-			return nil, err
-		}
-		events = append(events, e)
-	}
-	// returned value length in rows peropery
-	ids := make([]uuid.UUID, 0, len(events))
-	for _, e := range events {
-		ids = append(ids, e.ID)
-	}
-
-	// Mark events as claimed as it has been retrieved for processing
-	if len(ids) > 0 {
-		_, err := tx.Exec(ctx, `
-			UPDATE outbox_events
-			SET claimed_at = NOW()
-			WHERE id = ANY($1)
-			`, ids)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return events, nil
 }
