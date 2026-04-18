@@ -167,19 +167,3 @@ func (r *PostgresLinkRepository) insertTx(ctx context.Context, tx pgx.Tx, link m
 	link.ID = id
 	return link, nil
 }
-
-// InsertOutboxTx inserts an outbox event into the database within a transaction.
-func (r *PostgresLinkRepository) insertOutboxTx(ctx context.Context, tx pgx.Tx, event model.OutBoxEvent) error {
-	query := `
-		INSERT INTO outbox_events (
-			id, event_type, payload, created_at, processed, next_retry_at, retry_count
-		)
-		VALUES ($1, $2, $3, NOW(), false, NOW(), 0)
-	`
-	_, err := tx.Exec(ctx, query,
-		event.ID,
-		event.EventType,
-		event.Payload,
-	)
-	return err
-}

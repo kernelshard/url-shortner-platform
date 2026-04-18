@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kernelshard/url-shortner-platform/internal/model"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +21,7 @@ func CleanDB(t *testing.T, db *pgxpool.Pool) {
 }
 
 // SetupTestRepo sets up a test repository with a fresh database connection
-func SetupTestRepo(t *testing.T) (*PostgresLinkRepository, *pgxpool.Pool) {
+func SetupTestRepo(t *testing.T) (LinkOutboxRepository, *pgxpool.Pool) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -33,4 +35,15 @@ func SetupTestRepo(t *testing.T) (*PostgresLinkRepository, *pgxpool.Pool) {
 
 	repo := &PostgresLinkRepository{db: db}
 	return repo, db
+}
+
+// InsertBoxForTest inserts an outbox event into the database for testing
+func InsertBoxForTest(t *testing.T, repo *PostgresLinkRepository, e model.OutBoxEvent) {
+	t.Helper()
+	ctx := context.Background()
+
+	err := repo.WithTx(ctx, func(tx pgx.Tx) error {
+		return repo.insertOutboxTx(ctx, tx, e)
+	})
+	require.NoError(t, err)
 }

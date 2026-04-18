@@ -73,10 +73,6 @@ func (f *fakeRepo) Get(ctx context.Context, shortCode string) (model.Link, error
 	return link, nil
 }
 
-func (f *fakeRepo) InsertOutbox(ctx context.Context, event model.OutBoxEvent) error {
-	return nil
-}
-
 func (f *fakeRepo) CreateWithOutbox(ctx context.Context, link model.Link, event model.OutBoxEvent) (model.Link, error) {
 	return f.Insert(ctx, link)
 }
@@ -98,6 +94,14 @@ func (f *fakeRepo) MarkOutboxProcessedTx(ctx context.Context, tx pgx.Tx, id uuid
 }
 
 func (f *fakeRepo) UpdateRetryState(ctx context.Context, id uuid.UUID, next time.Time) error {
+	return nil
+}
+
+func (f *fakeRepo) InsertOutboxTx(ctx context.Context, tx pgx.Tx, event model.OutBoxEvent) error {
+	return nil
+}
+
+func (f *fakeRepo) UpdateRetryStateTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, next time.Time) error {
 	return nil
 }
 

@@ -16,7 +16,7 @@ import (
 // - Claims pending outbox events using a transaction.
 // - Publishes the events to the event bus.
 // - Marks the events as processed using a transaction.
-func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
+func StartOutboxWorker(repo repository.LinkOutboxRepository, pub event.Publisher) {
 	log.Printf("outbox: worker started")
 	for {
 		processBatch(repo, pub)
@@ -24,19 +24,14 @@ func StartOutboxWorker(repo repository.LinkRepository, pub event.Publisher) {
 	}
 }
 
-func processBatch(repo repository.LinkRepository, pub event.Publisher) {
-	pgRepo, ok := repo.(*repository.PostgresLinkRepository)
-	if !ok {
-		log.Printf("outbox: unexpected repo type: %T", repo)
-		return
-	}
+func processBatch(repo repository.LinkOutboxRepository, pub event.Publisher) {
 
 	ctx := context.Background()
 
 	var events []model.OutBoxEvent
-	err := pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
+	err := repo.WithTx(ctx, func(tx pgx.Tx) error {
 		var err error
-		events, err = pgRepo.ClaimPendingOutboxTx(ctx, tx, 10)
+		events, err = repo.ClaimPendingOutboxTx(ctx, tx, 10)
 		return err
 	})
 
@@ -60,7 +55,9 @@ func processBatch(repo repository.LinkRepository, pub event.Publisher) {
 
 			nextRetry := computeNextRetry(e.RetryCount)
 
-			err := pgRepo.UpdateRetryState(ctx, e.ID, nextRetry)
+			err := repo.WithTx(ctx, func(tx pgx.Tx) error {
+				return repo.UpdateRetryStateTx(ctx, tx, e.ID, nextRetry)
+			})
 			if err != nil {
 				log.Printf("outbox: update retry state failed id=%s err=%v", e.ID, err)
 			}
@@ -68,8 +65,8 @@ func processBatch(repo repository.LinkRepository, pub event.Publisher) {
 			continue
 		}
 
-		err = pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
-			return pgRepo.MarkOutboxProcessedTx(ctx, tx, e.ID)
+		err = repo.WithTx(ctx, func(tx pgx.Tx) error {
+			return repo.MarkOutboxProcessedTx(ctx, tx, e.ID)
 		})
 		if err != nil {
 			log.Printf("outbox: mark processed failed id=%s err=%v", e.ID, err)

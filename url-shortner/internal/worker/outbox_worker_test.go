@@ -26,6 +26,7 @@ func (m *mockPublisher) Publish(ctx context.Context, e event.Event) error {
 
 func TestRetryScheduledOnPublishFailute(t *testing.T) {
 	repo, db := repository.SetupTestRepo(t)
+	pgRepo := repo.(*repository.PostgresLinkRepository)
 	defer repository.CleanDB(t, db)
 	pub := &mockPublisher{shouldFail: true}
 
@@ -41,8 +42,8 @@ func TestRetryScheduledOnPublishFailute(t *testing.T) {
 		RetryCount:  0,
 	}
 
-	err := repo.InsertOutbox(ctx, e)
-	assert.NoError(t, err)
+	// insert the outbox event into the database for testing
+	repository.InsertBoxForTest(t, pgRepo, e)
 
 	// run one batch
 	processBatch(repo, pub)
@@ -59,8 +60,9 @@ func TestRetryScheduledOnPublishFailute(t *testing.T) {
 }
 
 // getOutboxEvent retrieves an outbox event by ID from the database.
-func getOutboxEvent(ctx context.Context, t *testing.T, repo *repository.PostgresLinkRepository, id uuid.UUID) (model.OutBoxEvent, error) {
+func getOutboxEvent(ctx context.Context, t *testing.T, repo repository.LinkOutboxRepository, id uuid.UUID) (model.OutBoxEvent, error) {
 	t.Helper()
+	pgRepo := repo.(*repository.PostgresLinkRepository)
 	query := `
 		SELECT id, event_type, payload, processed, next_retry_at, retry_count, created_at, claimed_at
 		FROM outbox_events
@@ -68,7 +70,7 @@ func getOutboxEvent(ctx context.Context, t *testing.T, repo *repository.Postgres
 	`
 
 	var e model.OutBoxEvent
-	err := repo.DB().QueryRow(ctx, query, id).Scan(
+	err := pgRepo.DB().QueryRow(ctx, query, id).Scan(
 		&e.ID,
 		&e.EventType,
 		&e.Payload,

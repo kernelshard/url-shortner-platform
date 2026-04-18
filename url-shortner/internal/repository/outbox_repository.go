@@ -18,7 +18,7 @@ type OutboxRepository interface {
 	// MarkOutboxProcessedTx marks a batch of outbox events as processed.
 	MarkOutboxProcessedTx(ctx context.Context, tx pgx.Tx, eventIDs uuid.UUID) error
 	// UpdateRetryState updates the retry state of an outbox event.
-	UpdateRetryState(ctx context.Context, id uuid.UUID, next time.Time) error
+	UpdateRetryStateTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, next time.Time) error
 }
 
 // PostgresLinkRepository is a concrete implementation of LinkRepository using PostgreSQL.
@@ -108,72 +108,18 @@ func (r *PostgresLinkRepository) ClaimPendingOutboxTx(ctx context.Context, tx pg
 	return events, nil
 }
 
-// InsertOutbox inserts an outbox event into the database.
-func (r *PostgresLinkRepository) InsertOutbox(ctx context.Context, event model.OutBoxEvent) error {
-	query := `
-		INSERT INTO outbox_events (id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`
-	_, err := r.db.Exec(ctx, query,
-		event.ID,
-		event.EventType,
-		event.Payload,
-		event.CreatedAt,
-		event.Processed,
-		event.NextRetryAt,
-		event.RetryCount,
-		event.ClaimedAt,
-	)
-	return err
-}
-
 // InsertOutboxTx inserts an outbox event into the database within a transaction.
-func (r *PostgresLinkRepository) InsertOutboxTx(ctx context.Context, tx pgx.Tx, event model.OutBoxEvent) error {
+func (r *PostgresLinkRepository) insertOutboxTx(ctx context.Context, tx pgx.Tx, event model.OutBoxEvent) error {
 	query := `
 		INSERT INTO outbox_events (id, event_type, payload, created_at, processed, next_retry_at, retry_count)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		VALUES ($1, $2, $3, NOW(), false, NOW(), 0)
 	`
 	_, err := tx.Exec(ctx, query,
 		event.ID,
 		event.EventType,
 		event.Payload,
-		event.CreatedAt,
-		event.Processed,
-		event.NextRetryAt,
-		event.RetryCount,
 	)
 	return err
-}
-
-// GetUnprocessedOutbox retrieves unprocessed outbox events from the database.
-func (r *PostgresLinkRepository) GetUnprocessedOutbox(ctx context.Context, limit int) ([]model.OutBoxEvent, error) {
-	query := `
-		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at
-		FROM outbox_events
-		WHERE processed = false
-		AND next_retry_at <= NOW()
-		ORDER BY created_at
-		FOR UPDATE SKIP LOCKED
-		LIMIT $1
-	`
-	rows, err := r.db.Query(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var events []model.OutBoxEvent
-
-	for rows.Next() {
-		var e model.OutBoxEvent
-		if err := rows.Scan(&e.ID, &e.EventType, &e.Payload, &e.CreatedAt, &e.Processed, &e.NextRetryAt, &e.RetryCount, &e.ClaimedAt); err != nil {
-			return nil, err
-		}
-		events = append(events, e)
-	}
-
-	return events, nil
-
 }
 
 // MarkOutboxProcessed marks an outbox event as processed in the database.
@@ -199,11 +145,12 @@ func (r *PostgresLinkRepository) MarkOutboxProcessedTx(ctx context.Context, tx p
 }
 
 // UpdateNextRetry updates the next retry time for an outbox event in the database.
-func (r *PostgresLinkRepository) UpdateRetryState(ctx context.Context, id uuid.UUID, next time.Time) error {
+func (r *PostgresLinkRepository) UpdateRetryStateTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, next time.Time) error {
 	query := `UPDATE outbox_events
 			  SET retry_count = retry_count + 1,
-					next_retry_at = $1
+					next_retry_at = $1,
+					claimed_at = NULL
 			  WHERE id = $2`
-	_, err := r.db.Exec(ctx, query, next, id)
+	_, err := tx.Exec(ctx, query, next, id)
 	return err
 }

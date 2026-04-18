@@ -18,6 +18,7 @@ func TestClaimPendingOutboxTx_Concurrent(t *testing.T) {
 	ctx := context.Background()
 
 	repo, db := SetupTestRepo(t)
+	pgRepo := repo.(*PostgresLinkRepository)
 	CleanDB(t, db)
 
 	// insert one event
@@ -32,7 +33,10 @@ func TestClaimPendingOutboxTx_Concurrent(t *testing.T) {
 		ClaimedAt:   nil,
 	}
 
-	err := repo.InsertOutbox(ctx, event)
+	// err := repo.InsertOutbox(ctx, event)
+	err := pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
+		return pgRepo.insertOutboxTx(ctx, tx, event)
+	})
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -79,6 +83,7 @@ func TestClaimPendingOutboxTx_NotRefetched(t *testing.T) {
 	ctx := context.Background()
 
 	repo, db := SetupTestRepo(t)
+	pgRepo := repo.(*PostgresLinkRepository)
 	CleanDB(t, db)
 
 	event := model.OutBoxEvent{
@@ -90,9 +95,12 @@ func TestClaimPendingOutboxTx_NotRefetched(t *testing.T) {
 		Processed:   false,
 	}
 
-	require.NoError(t, repo.InsertOutbox(ctx, event))
+	err := pgRepo.WithTx(ctx, func(tx pgx.Tx) error {
+		return pgRepo.insertOutboxTx(ctx, tx, event)
+	})
+	require.NoError(t, err)
 
-	err := repo.WithTx(ctx, func(tx pgx.Tx) error {
+	err = repo.WithTx(ctx, func(tx pgx.Tx) error {
 		events, err := repo.ClaimPendingOutboxTx(ctx, tx, 1)
 		require.NoError(t, err)
 		require.Len(t, events, 1)
