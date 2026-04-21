@@ -19,6 +19,9 @@ type OutboxRepository interface {
 	MarkOutboxProcessedTx(ctx context.Context, tx pgx.Tx, eventIDs uuid.UUID) error
 	// UpdateRetryState updates the retry state of an outbox event.
 	UpdateRetryStateTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, next time.Time) error
+
+	// MarkOutboxDeletedTx marks a batch of outbox events as dead lettered (dead status).
+	MarkOutboxDeadTx(ctx context.Context, tx pgx.Tx, eventIDs uuid.UUID) error
 }
 
 // PostgresLinkRepository is a concrete implementation of LinkRepository using PostgreSQL.
@@ -52,24 +55,29 @@ func (r *PostgresLinkRepository) WithTx(ctx context.Context, fn func(tx pgx.Tx) 
 // ClaimPendingOutboxTx atomically claims unprocessed outbox eventsl, each event is processed by only one worker.
 //
 // 1. selects unprocessed and unclaimes events
+//   - unclaimed events are those where `claimed_at` is NULL or less than 1 minute ago
+//   - cause
+//
 // 2. skips rows locked by other transactions
 // 3. mark them as claimed by updating the `claimed_at` column
 func (r *PostgresLinkRepository) ClaimPendingOutboxTx(ctx context.Context, tx pgx.Tx, limit int) ([]model.OutBoxEvent, error) {
 	// skip already claimed events and rows locked by other transactions
+	leaseDuration := 1 * time.Minute
+	leaseDurationSeconds := int(leaseDuration.Seconds())
 	query := `
 		SELECT id, event_type, payload, created_at, processed, next_retry_at, retry_count, claimed_at
 		FROM outbox_events
 		WHERE processed = false
 		AND (
 		    claimed_at IS NULL
-			OR claimed_at < NOW() - INTERVAL '1 minute'
+			OR claimed_at < NOW() - ($2 * INTERVAL '1 second')
 		)
 		AND next_retry_at <= NOW()
 		ORDER BY created_at
 		FOR UPDATE SKIP LOCKED
 		LIMIT $1
 	`
-	rows, err := tx.Query(ctx, query, limit)
+	rows, err := tx.Query(ctx, query, limit, leaseDurationSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +145,7 @@ func (r *PostgresLinkRepository) MarkOutboxProcessed(ctx context.Context, id uui
 func (r *PostgresLinkRepository) MarkOutboxProcessedTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
 	query := `
 		UPDATE outbox_events
-		SET processed = true
+		SET status = 'processed'
 		WHERE id = $1
 	`
 	_, err := tx.Exec(ctx, query, id)
@@ -150,7 +158,20 @@ func (r *PostgresLinkRepository) UpdateRetryStateTx(ctx context.Context, tx pgx.
 			  SET retry_count = retry_count + 1,
 					next_retry_at = $1,
 					claimed_at = NULL
+					status = 'pending'
 			  WHERE id = $2`
 	_, err := tx.Exec(ctx, query, next, id)
+	return err
+}
+
+// MarkOutboxDeadTx marks an outbox event as dead in the database within a transaction.
+func (r *PostgresLinkRepository) MarkOutboxDeadTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
+	query := `
+		UPDATE outbox_events
+		SET status = 'dead',
+		claimed_at = NULL
+		WHERE id = $1
+	`
+	_, err := tx.Exec(ctx, query, id)
 	return err
 }

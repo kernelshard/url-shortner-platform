@@ -52,8 +52,19 @@ func processBatch(repo repository.LinkOutboxRepository, pub event.Publisher) {
 
 		if err != nil {
 			log.Printf("outbox: publish failed id=%s err=%v", e.ID, err)
+			const maxRetries = 10
 
-			nextRetry := computeNextRetry(e.RetryCount)
+			if e.RetryCount+1 >= maxRetries {
+				err = repo.WithTx(ctx, func(tx pgx.Tx) error {
+					return repo.MarkOutboxDeadTx(ctx, tx, e.ID)
+				})
+				if err != nil {
+					log.Printf("outbox: mark dead failed id=%s err=%v", e.ID, err)
+				}
+				continue
+			}
+
+			nextRetry := computeNextRetry(e.RetryCount + 1)
 
 			err := repo.WithTx(ctx, func(tx pgx.Tx) error {
 				return repo.UpdateRetryStateTx(ctx, tx, e.ID, nextRetry)

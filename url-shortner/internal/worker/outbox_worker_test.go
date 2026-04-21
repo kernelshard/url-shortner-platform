@@ -24,7 +24,8 @@ func (m *mockPublisher) Publish(ctx context.Context, e event.Event) error {
 	return nil
 }
 
-func TestRetryScheduledOnPublishFailute(t *testing.T) {
+// TestRetryScheduledOnPublishFailure tests that the outbox worker retries a failed event after a delay.
+func TestRetryScheduledOnPublishFailure(t *testing.T) {
 	repo, db := repository.SetupTestRepo(t)
 	pgRepo := repo.(*repository.PostgresLinkRepository)
 	defer repository.CleanDB(t, db)
@@ -55,7 +56,7 @@ func TestRetryScheduledOnPublishFailute(t *testing.T) {
 	// assertions
 	assert.False(t, updated.Processed, "event should NOT be marked processed on failure")
 	assert.Equal(t, 1, updated.RetryCount, "retry count should increase on failure")
-	assert.True(t, updated.NextRetryAt.After(time.Now()), "next retry time should be in the future")
+	assert.True(t, updated.NextRetryAt.After(time.Now().UTC()), "next retry time should be in the future")
 
 }
 

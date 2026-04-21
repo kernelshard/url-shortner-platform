@@ -105,6 +105,10 @@ func (f *fakeRepo) UpdateRetryStateTx(ctx context.Context, tx pgx.Tx, id uuid.UU
 	return nil
 }
 
+func (f *fakeRepo) MarkOutboxDeadTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
+	return nil
+}
+
 // create no-op publisher for tests
 type fakePublisher struct{}
 
