@@ -1,46 +1,63 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"
+	"github.com/kernelshard/url-shortner-platform/notification-service/internal/contract"
+	"github.com/kernelshard/url-shortner-platform/notification-service/internal/repository"
 )
 
-func NewHTTPHandler(db *pgxpool.Pool) *HTTPHandler {
-	return &HTTPHandler{db: db}
+type EmailService interface {
+	Send(ctx context.Context, email string, subject string, body string) error
 }
 
-type HTTPHandler struct {
-	db *pgxpool.Pool
+type emailService struct {
 }
 
-func (h *HTTPHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
+func (s *emailService) Send(ctx context.Context, email string, subject string, body string) error {
+	log.Printf("sending email to %s: %s - %s", email, subject, body)
+	return nil
+}
+
+func NewEmailService() *emailService {
+	return &emailService{}
+}
+
+type HttpHandler struct {
+	repo         repository.ProcessedEventRepository
+	emailService EmailService
+}
+
+func NewHttpHandler(repo repository.ProcessedEventRepository, emailService EmailService) *HttpHandler {
+	return &HttpHandler{repo: repo, emailService: emailService}
+}
+
+func (h *HttpHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// parse request body
-	var req struct {
-		EventID   string          `json:"event_id"`
-		EventType string          `json:"event_type"`
-		Data      json.RawMessage `json:"data"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// 1. decode
+	var e contract.Event
+	if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	// 1. idempotency check (INSERT-first)
-	_, err := h.db.Exec(ctx, `
-		INSERT INTO processed_events (event_id)
-		VALUES ($1)
-	`, req.EventID)
 
+	// 2. parse UUID safely
+	id, err := uuid.Parse(e.EventID)
 	if err != nil {
-		if isUniqueViolation(err) {
-			log.Printf("duplicate event ignored id %s", req.EventID)
+		http.Error(w, "invalid event_id", http.StatusBadRequest)
+		return
+	}
+
+	// 3. idempotency gate
+	err = h.repo.Insert(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrEventAlreadyProcessed) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -48,15 +65,30 @@ func (h *HTTPHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. process event (for now, just log)
-	log.Printf("processed event: id=%s type=%s", req.EventID, req.EventType)
-	w.WriteHeader(http.StatusOK)
-}
+	// 4. process event
+	switch e.Type {
 
-// isUniqueViolation checks if the error is a unique violation error
-func isUniqueViolation(err error) bool {
-	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
-		return pgErr.Code == "23505"
+	case "link.created":
+		// decode payload properly
+		var payload struct {
+			Email string `json:"email"`
+		}
+
+		if err := json.Unmarshal(e.Data, &payload); err != nil {
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			return
+		}
+
+		if err := h.emailService.Send(ctx, payload.Email, "Link Created", "Your link has been created"); err != nil {
+			http.Error(w, "failed to send email", http.StatusInternalServerError)
+			return
+		}
+
+	default:
+		// unknown event - ignore and return 200
+		w.WriteHeader(http.StatusOK)
+		return
 	}
-	return false
+
+	w.WriteHeader(http.StatusOK)
 }
