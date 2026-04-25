@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/handler"
+	"github.com/kernelshard/url-shortner-platform/notification-service/internal/repository"
 )
 
 func main() {
@@ -22,7 +23,11 @@ func main() {
 	}
 	defer dbPool.Close()
 
-	h := handler.NewHTTPHandler(dbPool)
+	repo := repository.NewPostgresProcessedEventRepository(dbPool)
+	emailSVC := handler.NewEmailService()
+
+	h := handler.NewHttpHandler(repo, emailSVC)
+
 	http.HandleFunc("/events", h.HandleEvents)
 
 	port := os.Getenv("PORT")
