@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/handler"
@@ -40,5 +42,18 @@ func main() {
 
 	port := os.Getenv("PORT")
 	log.Println("notification service running on :", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	// log.Fatal(http.ListenAndServe(":"+port, nil))
+	//
+	go func() {
+		if err := http.ListenAndServe(":"+port, nil); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+
+	<-quit
+	cancel()
+	time.Sleep(5 * time.Second)
 }
