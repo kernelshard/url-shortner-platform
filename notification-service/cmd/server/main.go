@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/handler"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/repository"
+	"github.com/kernelshard/url-shortner-platform/notification-service/internal/service"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/worker"
 )
 
@@ -27,7 +28,8 @@ func main() {
 	defer dbPool.Close()
 
 	repo := repository.NewPostgresProcessedEventRepository(dbPool)
-	emailSvc := handler.NewEmailService()
+	eventSvc := service.NewEventService(repo)
+	emailSvc := service.NewEmailService()
 
 	emailRepo := repository.NewPostgresEmailDeliveryRepository(dbPool)
 
@@ -36,7 +38,7 @@ func main() {
 
 	go worker.RunWorker(workerCtx, emailRepo, emailSvc)
 
-	h := handler.NewHttpHandler(repo, emailSvc)
+	h := handler.NewHttpHandler(eventSvc)
 
 	http.HandleFunc("/events", h.HandleEvents)
 
