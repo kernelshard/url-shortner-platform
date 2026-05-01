@@ -15,6 +15,7 @@ var (
 type ProcessedEventRepository interface {
 	Insert(ctx context.Context, id uuid.UUID) error
 	Exists(ctx context.Context, id uuid.UUID) (bool, error)
+	InsertWithEmailTx(ctx context.Context, id uuid.UUID, email string) error
 }
 
 type postgresProcessedEventRepository struct {
@@ -61,4 +62,40 @@ func (r *postgresProcessedEventRepository) Exists(ctx context.Context, id uuid.U
 	}
 
 	return exists, nil
+}
+
+func (r postgresProcessedEventRepository) InsertWithEmailTx(
+	ctx context.Context,
+	eventID uuid.UUID,
+	email string,
+) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback(ctx)
+
+	// 1. Try to insert event
+	_, err = tx.Exec(ctx,
+		`INSERT INTO processed_events (event_id)
+		VALUES ($1)
+		ON CONFLICT (event_id) DO NOTHING`, eventID)
+
+	if err != nil {
+		return err
+	}
+
+	// insert email_deliveries
+	_, err = tx.Exec(ctx, `
+		INSERT INTO email_deliveries (event_id, email)
+		VALUES ($1, $2)
+		ON CONFLICT (event_id) DO NOTHING
+		`, eventID, email)
+
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

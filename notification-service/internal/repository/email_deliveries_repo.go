@@ -46,7 +46,9 @@ func (r *pgEmailDeliveryRepo) FetchPending(ctx context.Context, limit int) ([]Em
 	query := `
 	    SELECT event_id, email
 		FROM email_deliveries
-		WHERE status = 'pending'
+		WHERE status IN ('pending', 'failed')
+		    AND retry_count < 5
+			AND (next_retry_at IS NULL OR next_retry_at < NOW())
 		FOR UPDATE SKIP LOCKED
 		LIMIT $1
 		`
