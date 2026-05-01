@@ -27,6 +27,10 @@ func (m *mockRepo) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	return false, nil
 }
 
+func (m *mockRepo) InsertWithEmailTx(ctx context.Context, id uuid.UUID, email string) error {
+	return m.insertErr
+}
+
 type mockEmailService struct {
 	called bool
 	err    error
@@ -52,9 +56,8 @@ func makeRequest(t *testing.T, e contract.Event) *http.Request {
 
 // TestHandleEvents_InvalidBody tests that the handler returns a 400 Bad Request when the request body is not valid JSON.
 func TestHandleEvents_InvalidBody(t *testing.T) {
-	repo := &mockRepo{}
-	emailService := &mockEmailService{}
-	handler := NewHttpHandler(repo, emailService)
+	eventSvc := &mockEventService{}
+	handler := NewHttpHandler(eventSvc)
 
 	req := httptest.NewRequest(http.MethodPost, "/events", bytes.NewReader([]byte("invalid json")))
 	w := httptest.NewRecorder()
@@ -66,7 +69,7 @@ func TestHandleEvents_InvalidBody(t *testing.T) {
 
 // TestHandleEvents_InvalidEventID tests that the handler returns a 400 Bad Request when the event_id is not a valid UUID.
 func TestHandleEvents_InvalidEventID(t *testing.T) {
-	handler := NewHttpHandler(&mockRepo{}, &mockEmailService{})
+	handler := NewHttpHandler(&mockEventService{})
 
 	e := contract.Event{
 		EventID: "invalid-uuid",
@@ -80,9 +83,10 @@ func TestHandleEvents_InvalidEventID(t *testing.T) {
 }
 
 func TestHandleEvents_EventAlreadyProcessed(t *testing.T) {
-	repo := &mockRepo{insertErr: repository.ErrEventAlreadyProcessed}
-	emailSvc := &mockEmailService{}
-	handler := NewHttpHandler(repo, emailSvc)
+	eventService := &mockEventService{
+		err: repository.ErrEventAlreadyProcessed,
+	}
+	handler := NewHttpHandler(eventService)
 
 	e := contract.Event{
 		EventID: uuid.New().String(),
@@ -94,13 +98,12 @@ func TestHandleEvents_EventAlreadyProcessed(t *testing.T) {
 
 	handler.HandleEvents(w, req)
 	require.Equal(t, http.StatusOK, w.Code, "expected 200 OK for already processed event")
-	require.False(t, emailSvc.called, "email service should not be called for already processed event")
+	require.True(t, eventService.called, "event service should not be called for already processed event")
 }
 
 func TestHandleEvents_EmailServiceError(t *testing.T) {
-	repo := &mockRepo{}
-	emailSvc := &mockEmailService{err: assert.AnError}
-	handler := NewHttpHandler(repo, emailSvc)
+	eventSvc := &mockEventService{err: assert.AnError}
+	handler := NewHttpHandler(eventSvc)
 
 	e := contract.Event{
 		EventID: uuid.New().String(),
@@ -116,9 +119,8 @@ func TestHandleEvents_EmailServiceError(t *testing.T) {
 }
 
 func TestHandleEvents_Success(t *testing.T) {
-	repo := &mockRepo{}
-	emailSvc := &mockEmailService{}
-	handler := NewHttpHandler(repo, emailSvc)
+	eventSvc := &mockEventService{}
+	handler := NewHttpHandler(eventSvc)
 
 	e := contract.Event{
 		EventID: uuid.New().String(),
@@ -132,5 +134,5 @@ func TestHandleEvents_Success(t *testing.T) {
 	handler.HandleEvents(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, "expected 200 OK for successful event processing")
-	require.True(t, emailSvc.called, "email service should be called for successful event")
+	require.True(t, eventSvc.called, "email service should be called for successful event")
 }

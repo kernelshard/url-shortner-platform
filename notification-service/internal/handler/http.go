@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -10,32 +9,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/contract"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/repository"
+	"github.com/kernelshard/url-shortner-platform/notification-service/internal/service"
 )
 
-type EmailService interface {
-	Send(ctx context.Context, email string, subject string, body string) error
-}
-
-type emailService struct {
-}
-
-func (s *emailService) Send(ctx context.Context, email string, subject string, body string) error {
-	log.Printf("sending email to %s: %s - %s", email, subject, body)
-	return nil
-}
-
-func NewEmailService() *emailService {
-	return &emailService{}
-}
-
 type HttpHandler struct {
-	repo         repository.ProcessedEventRepository
-	emailRepo    repository.EmailDeliveryRepository
-	emailService EmailService
+	eventSvc service.EventProcessor
 }
 
-func NewHttpHandler(repo repository.ProcessedEventRepository, emailService EmailService) *HttpHandler {
-	return &HttpHandler{repo: repo, emailService: emailService}
+func NewHttpHandler(eventSvc service.EventProcessor) *HttpHandler {
+	return &HttpHandler{eventSvc: eventSvc}
 }
 
 func (h *HttpHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
@@ -55,20 +37,7 @@ func (h *HttpHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. idempotency gate
-	err = h.repo.Insert(ctx, id)
-	if err != nil {
-		if errors.Is(err, repository.ErrEventAlreadyProcessed) {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// 4. process event
 	switch e.Type {
-
 	case "link.created":
 		// decode payload properly
 		var payload struct {
@@ -81,10 +50,14 @@ func (h *HttpHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// insert pending email delivery to be processed by a worker later
-		err = h.emailRepo.InsertPending(ctx, id, payload.Email)
+		err = h.eventSvc.ProcessLinkCreated(ctx, id, payload.Email)
 		if err != nil {
-			log.Printf("failed to insert pending email delivery for event %s: %v", id, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			//
+			if errors.Is(err, repository.ErrEventAlreadyProcessed) {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 

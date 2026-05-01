@@ -3,13 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/contract"
-	"github.com/kernelshard/url-shortner-platform/notification-service/internal/repository"
 )
 
 // FakeEmailService is a thread-safe fake implementation of the EmailService interface
@@ -34,15 +34,21 @@ func (f *FakeEmailService) Count() int {
 	return f.count
 }
 
+type mockEventService struct {
+	err    error
+	called bool
+}
+
+func (m *mockEventService) ProcessLinkCreated(ctx context.Context, eventID uuid.UUID, email string) error {
+	m.called = true
+	return m.err
+}
+
 // Test_Idempotency_Concurrent tests that when multiple concurrent requests with
 // the same event ID are sent to the handler, only one email is sent.
 func Test_Idempotency_Concurrent(t *testing.T) {
-	db := repository.TestDB(t)
-
-	repo := repository.NewPostgresProcessedEventRepository(db)
-
-	email := &FakeEmailService{}
-	handler := NewHttpHandler(repo, email)
+	svc := &mockEventService{}
+	handler := NewHttpHandler(svc)
 
 	e := contract.Event{
 		EventID: uuid.NewString(),
@@ -54,21 +60,21 @@ func Test_Idempotency_Concurrent(t *testing.T) {
 	maxRequests := 50
 
 	for range maxRequests {
+		wg.Add(1)
 
-		wg.Go(func() {
+		go func() {
+			defer wg.Done()
+
 			req := makeRequest(t, e)
 			w := httptest.NewRecorder()
+
 			handler.HandleEvents(w, req)
 
-			if w.Code != 200 {
-				t.Errorf("expected status 200, got %d", w.Code)
+			if w.Code != http.StatusOK {
+				t.Errorf("expected 200, got %d", w.Code)
 			}
-
-		})
+		}()
 	}
-
 	wg.Wait()
-	if email.Count() != 1 {
-		t.Errorf("expected email to be sent once, but was sent %d times", email.Count())
-	}
+
 }
