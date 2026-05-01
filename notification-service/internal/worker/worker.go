@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/kernelshard/url-shortner-platform/notification-service/internal/handler"
 	"github.com/kernelshard/url-shortner-platform/notification-service/internal/repository"
+	"github.com/kernelshard/url-shortner-platform/notification-service/internal/service"
 )
 
-func RunWorker(ctx context.Context, repo repository.EmailDeliveryRepository, emailService handler.EmailService) {
+func RunWorker(ctx context.Context, repo repository.EmailDeliveryRepository, emailSvc service.EmailSender) {
 	ticker := time.NewTicker(2 * time.Second)
 
 	for {
@@ -16,13 +16,13 @@ func RunWorker(ctx context.Context, repo repository.EmailDeliveryRepository, ema
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			processPendingBatchEmails(ctx, repo, emailService)
+			processPendingBatchEmails(ctx, repo, emailSvc)
 		}
 	}
 }
 
 // processPendingBatchEmails fetches a batch of pending email deliveries and attempts to send them.
-func processPendingBatchEmails(ctx context.Context, repo repository.EmailDeliveryRepository, emeilSvc handler.EmailService) {
+func processPendingBatchEmails(ctx context.Context, repo repository.EmailDeliveryRepository, emeilSvc service.EmailSender) {
 	items, err := repo.FetchPending(ctx, 10)
 	if err != nil {
 		return
